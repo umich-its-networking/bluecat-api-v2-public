@@ -18,20 +18,6 @@ def parse(description="Delete Resource Records by hostname"):
     return config
 
 
-def  get_rr(session, hostname):
-    '''get resource record by absoluteName'''
-    url = f"{session.mainurl}/resourceRecords?fields=embed(dependentRecords)&filter=absoluteName:eq(\"{hostname}\")"
-    response = requests.get(
-                url, headers=session.auth_header, timeout=session.timeout
-            )
-    data = response.json()
-    if data['count'] == 0:
-        print(f"Not found: hostname")
-        return None
-    return data
-    #print(json.dumps(data))
-
-
 def delete_rr(session,id):
     '''Delete object by id'''
     logger = logging.getLogger()
@@ -41,9 +27,11 @@ def delete_rr(session,id):
             )
     if response.status_code in (202,204):
         logger.debug("Deleted")
+        return True
     else:
         print(response)
         print(f"ERROR: {response.json()}")
+        return f"ERROR: {response.json()}"
 
 
 def main():
@@ -60,14 +48,17 @@ def main():
 
     session = BAMv2(args.server, args.username, args.password, args.timeout)
 
-    #print(f"looking for {hostname}")
-    data=session.get_rr(hostname)
-    #print(f"got {data}")
-    if data:
-        for obj in data:
-            print(f"Deleting: {obj}")
-            id=obj['id']
-            delete_rr(session,id)
+    with session:
+        #print(f"looking for {hostname}")
+        data=session.get_rr(hostname)
+        #print(f"got {data}")
+        if data:
+            for obj in data:
+                print(f"Deleting: {obj}")
+                id=obj['id']
+                delete_rr(session,id)
+        else:
+            print(f"Not found: {hostname}")
 
 if __name__ == "__main__":
     main()

@@ -32,13 +32,14 @@ def main():
 
     session = BAMv2(args.server, args.username, args.password, args.timeout)
 
-    # print(f"looking for {hostname}")
-    data = session.get_rr(hostname)
-    # print(f"{data}")
-    if data:
-        print(json.dumps(data))
-    else:
-        print(f"Not found: {hostname}")
+    with session:
+        # print(f"looking for {hostname}")
+        data = session.get_rr(hostname)
+        # print(f"{data}")
+        if data:
+            print(json.dumps(data))
+        else:
+            print(f"Not found: {hostname}")
 
 
 if __name__ == "__main__":
