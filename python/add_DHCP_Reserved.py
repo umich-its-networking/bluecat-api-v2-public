@@ -11,6 +11,7 @@ import logging
 import argparse
 import re
 import requests
+import json
 from bamv2 import BAMv2
 
 
@@ -93,12 +94,12 @@ def add_dhcp_reserved(dic, session):
             return
         print("Success.")
         data = response.json()
-        print(data)
+        print(json.dumps(data))
         return 
 
     if data["count"] == 1:
         ip_obj = data["data"][0]
-        print("Update existing: ", ip_obj)
+        print("Update existing: ", json.dumps(ip_obj))
         update_helper(session, ip_obj, dic)
 
 
