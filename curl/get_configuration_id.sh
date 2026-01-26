@@ -10,9 +10,10 @@ else
   exit 1
 fi
 
+
 # get authentication
-x=$(curl $BLUECAT_CURL_OPTIONS -sS -X POST -H "Content-Type: application/json" -d '{"username": "'$BLUECAT_USERNAME'","password": "'$BLUECAT_PASSWORD'"}' https://$BLUECAT_SERVER/api/v2/sessions)
-BLUECAT_BASICAUTH=$(sed -E -e 's/^.*basicAuthenticationCredentials":"([^"]+)".*$/\1/' <<< "$x")
+#x=$(curl $BLUECAT_CURL_OPTIONS -sS -X POST -H "Content-Type: application/json" -d '{"username": "'$BLUECAT_USERNAME'","password": "'$BLUECAT_PASSWORD'"}' https://$BLUECAT_SERVER/api/v2/sessions)
+#BLUECAT_BASICAUTH=$(sed -E -e 's/^.*basicAuthenticationCredentials":"([^"]+)".*$/\1/' <<< "$x")
 
 # get configuration_id
 x=$(curl $BLUECAT_CURL_OPTIONS -sS -X 'GET' 'https://'$BLUECAT_SERVER'/api/v2/configurations?fields=id&filter=name%3Aeq%28%27'"$cfgname"'%27%29' -H 'accept: application/hal+json' -H 'Authorization: Basic '$BLUECAT_BASICAUTH)
