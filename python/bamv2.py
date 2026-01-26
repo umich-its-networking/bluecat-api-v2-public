@@ -189,7 +189,7 @@ class BAMv2(requests.Session):  # pylint: disable=R0902
 
         configuration_url = f"{self.mainurl}/configurations?fields=id,name&filter=name:eq('{configuration_name}')"
         response = requests.get(
-            configuration_url, headers=self.auth_header, timeout=self.timeout
+            configuration_url, headers=self.auth_header_nolinks, timeout=self.timeout
         )
         if response.status_code == 200:
             configurations = response.json()
@@ -206,7 +206,7 @@ class BAMv2(requests.Session):  # pylint: disable=R0902
                 f"{self.mainurl}/views?fields=id,name&filter=name:eq('{view_name}')"
             )
             response = requests.get(
-                view_url, headers=self.auth_header, timeout=self.timeout
+                view_url, headers=self.auth_header_nolinks, timeout=self.timeout
             )
             if response.status_code == 200:
                 views = response.json()
@@ -365,13 +365,13 @@ class BAMv2(requests.Session):  # pylint: disable=R0902
         if re.match(block_pattern, identifier):
             network_url = f"{self.mainurl}/networks?filter=range:eq('{identifier}')"
             response = requests.get(
-                network_url, headers=self.auth_header, timeout=self.timeout
+                network_url, headers=self.auth_header_nolinks, timeout=self.timeout
             )
             if response.status_code == 200 and response.json().get("data"):
                 return "network"
             block_url = f"{self.mainurl}/blocks?filter=range:eq('{identifier}')"
             response = requests.get(
-                block_url, headers=self.auth_header, timeout=self.timeout
+                block_url, headers=self.auth_header_nolinks, timeout=self.timeout
             )
             if response.status_code == 200 and response.json().get("data"):
                 return "block"
@@ -488,7 +488,7 @@ class BAMv2(requests.Session):  # pylint: disable=R0902
         """Add a user to a group in BlueCat BAMv2 API"""
         print(f"Adding user to group {groupname}", end=" ")
         url = f"{self.mainurl}/groups?filter=name:eq('{urllib.parse.quote(groupname)}')"
-        response = requests.get(url, headers=self.auth_header, timeout=self.timeout)
+        response = requests.get(url, headers=self.auth_header_nolinks, timeout=self.timeout)
         if response.status_code != 200:
             print("Failed to get group ID. Error:", response.text)
         data = response.json()
@@ -500,7 +500,7 @@ class BAMv2(requests.Session):  # pylint: disable=R0902
         url = f"{self.mainurl}/groups/{group_id}/users"
         msg = {"id": userid, "type": "User"}
         response = requests.post(
-            url, headers=self.auth_header, json=msg, timeout=self.timeout
+            url, headers=self.auth_header_nolinks, json=msg, timeout=self.timeout
         )
         if response.status_code == 201:
             print("Succeeded!")
@@ -513,7 +513,7 @@ class BAMv2(requests.Session):  # pylint: disable=R0902
         print(f"Getting user {username} groups", end=" ")
 
         url = f"{self.mainurl}/users?filter=name:eq('{username}')"
-        response = requests.get(url, headers=self.auth_header, timeout=self.timeout)
+        response = requests.get(url, headers=self.auth_header_nolinks, timeout=self.timeout)
         if response.status_code != 200:
             print("Failed to get user ID. Error:", response.text)
         data = response.json()
@@ -542,7 +542,7 @@ class BAMv2(requests.Session):  # pylint: disable=R0902
         print(f"Getting group {groupname} users", end=" ")
 
         url = f"{self.mainurl}/groups?filter=name:eq('{urllib.parse.quote(groupname)}')"
-        response = requests.get(url, headers=self.auth_header, timeout=self.timeout)
+        response = requests.get(url, headers=self.auth_header_nolinks, timeout=self.timeout)
         if response.status_code != 200:
             print("Failed to get group ID. Error:", response.text)
         data = response.json()
@@ -552,7 +552,7 @@ class BAMv2(requests.Session):  # pylint: disable=R0902
         group_id = data["data"][0]["id"]
 
         url = f"{self.mainurl}/groups/{group_id}/users"
-        response = requests.get(url, headers=self.auth_header, timeout=self.timeout)
+        response = requests.get(url, headers=self.auth_header_nolinks, timeout=self.timeout)
         if response.status_code != 200:
             print(f"Failed: {response.status_code}")
             logging.debug(response.text)
