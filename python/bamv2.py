@@ -261,12 +261,9 @@ class BAMv2(requests.Session):  # pylint: disable=R0902
         return config
 
 
-    def get(self, urlpath, links=None, **kwargs):
+    def get(self, url, links=None, **kwargs):
         """wrapper for requests.get with url prefix and error handling"""
-         # remove /api/v2 if included in urlpath, since mainurl already has it
-        urlpath=urlpath.removeprefix("/api/v2")
-        logging.debug(f"Using {self.mainurl} GET {urlpath} with kwargs {kwargs}")
-        url = f"{self.mainurl}{urlpath}"
+        logging.debug(f"GET {url} with kwargs {kwargs}")
         if links is None:
             links = self.links
         if links:
@@ -1092,10 +1089,10 @@ class BAMv2(requests.Session):  # pylint: disable=R0902
 
     def get_block(self,ip, links=True):
         """get closest enclosing block for IP Address, including blocks defined by a range, return blockobj,errormsg"""
-        network_url = f"{self.mainurl}/blocks?filter=configuration.name:eq('{self.configuration_name}') and range:contains('{ip}')"
+        url = f"{self.mainurl}/blocks?filter=configuration.name:eq('{self.configuration_name}') and range:contains('{ip}')"
         # Need the links on this one
         response = self.get(
-            network_url, links=True, timeout=self.timeout
+            url, links=True, timeout=self.timeout
         )
         if not response.status_code == 200:
             logging.debug(response.text)
