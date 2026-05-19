@@ -9,6 +9,7 @@ import argparse
 import re
 import time
 import requests
+from ipaddress import ip_address, ip_network
 
 
 class BAMv2(requests.Session):  # pylint: disable=R0902
@@ -23,13 +24,15 @@ class BAMv2(requests.Session):  # pylint: disable=R0902
 
     def __init__(
         self,
-        server,
-        username,
-        password,
+        server=None,
+        username=None,
+        password=None,
         timeout=None,
         max_retries=None,
         configuration_name=None,
-        view_name=None
+        view_name=None,
+        links=None,
+        **kwargs
     ):
         """login to BlueCat server API, get token, set header"""
         self.username = username
@@ -39,11 +42,15 @@ class BAMv2(requests.Session):  # pylint: disable=R0902
         self.configuration_name = configuration_name
         self.view_id = None
         self.view_name = view_name
+        self.links = links
         # self.parentviewcache = {}  # zoneid: viewid
         if not (server and username and password):
             print("server, username, and password are required.\n")
             raise requests.RequestException
         self.server = server
+        logging.debug(f"server: {self.server} username: {self.username} timeout: {self.timeout} "
+                      f"links: {self.links} configuration_name: {self.configuration_name} "
+                      f"view_name: {self.view_name}")
         self.mainurl = f"https://{server}/api/v2"
         logging.info("url: %s", self.mainurl)
 
@@ -53,19 +60,83 @@ class BAMv2(requests.Session):  # pylint: disable=R0902
             url_prefix = self.mainurl.split("://", 1)[0] + "://"
             self.mount(url_prefix, adapter)
         self.login()
+
         # set up compiled patterns once at start for later .match
-        self.ip_pattern = re.compile(
-            r"^(?P<start>(?:\d{1,3}\.){3}\d{1,3})"
-            r"(?:\/(?P<prefix>\d{1,2})|"
-            r"-(?P<end>(?:\d{1,3}\.){3}\d{1,3})|)$"
+        # IP patterns are not fully detailed, but we then check with ipaddress
+        # Tested at regex101.com
+        # for a full regex, see https://regex101.com/r/5CZpb6/1
+        self.ip6_range_pattern = re.compile(
+            r"^(?P<start>[:0-9a-fA-F]+)"
+            r"-(?P<end>[:0-9a-fA-F]+)$"
         )
-        self.id_pattern = re.compile(r"\d+$")
+        """test cases for ip6_range regex:
+        2001:db8::1-2001:db8::ffff
+        ::1-::ffff
+        """
+        self.ip4_range_pattern = re.compile(
+            r"^(?P<start>[.0-9]+)"
+            r"-(?P<end>[.0-9]+)$"
+        )
+        """test cases for ip4_range regex:
+        1.2.3.4-255.255.255.255
+        10.10.10.10-10.10.20.20
+        """
+        self.ip4_pattern = re.compile(
+            r"^(?:\d{1,3}\.){3}\d{1,3}$"
+        )
+        """ test cases for ip4 regex
+        1.2.3.4
+        4.33.22.111
+        10.10.20.20
+        255.255.255.255
+        """
+        self.ip6_pattern = re.compile(
+            r"^:{0,2}(?:[0-9a-fA-F]{1,4}(?:\.|::?)){0,9}[0-9a-fA-F]{1,4}:{0,2}$"
+        )
+        """ test cases  for ip6 regex
+        a:b:c:d:e:F:1:2
+        2001:db8::1
+        ::1
+        """
+        self.ip4_cidr_pattern = re.compile(
+            r"^(?P<ip>(?:\d{1,3}\.){3}\d{1,3})"
+            r"\/(?P<prefix>\d{1,2})$"
+        )
+        """ test cases for ip4 CIDR regex
+        10.0.0.0/8
+        35.1.22.128/25
+        10.10.0.0/16
+        255.255.255.255/32
+        """
+        self.ip6_cidr_pattern = re.compile(
+            r"^(?P<ip>:{0,2}(?:[0-9a-fA-F]{1,4}(?:\.|::?)){0,9}[0-9a-fA-F]{1,4}:{0,2})"
+            r"\/(?P<prefix>\d{1,3})$"
+        )
+        """ test cases for ip6 CIDR regex
+        2001:db8::1/64
+        ::1/128
+        """
         self.mac_pattern = re.compile(
             r"^((?:[0-9a-fA-F]{1,2}[:-]){5}[0-9a-fA-F]{1,2}|"
-            "[0-9a-fA-F]{12}|(?:[0-9a-fA-F]{4}[.]){2}[0-9a-fA-F]{4})"
-        )   
-        self.fqdn_pattern = re.compile(r"[a-zA-Z0-9-_]+(\.[a-zA-Z0-9-_]+)*")
-
+            "[0-9a-fA-F]{12}|(?:[0-9a-fA-F]{4}[.]){2}[0-9a-fA-F]{4})$"
+        )
+        """ test cases for MAC regex
+        00:11:22:33:44:55
+        00-11-22-33-44-55
+        001122334455
+        0011.2233.4455
+        """
+        self.fqdn_pattern = re.compile(r"^[a-zA-Z0-9-_]+(\.[a-zA-Z0-9-_]+)+$")
+        """ test cases for FQDN regex
+        example.com
+        sub.example.com
+        example.co.uk
+        """
+        self.id_pattern = re.compile(r"^\d+$")
+        """ test cases for ID regex
+        12345
+        67890
+        """
 
     def __exit__(self, *args):
         self.logout()
@@ -103,14 +174,14 @@ class BAMv2(requests.Session):  # pylint: disable=R0902
         )
         # logging.info(self.basic_auth_credentials)
 
-        self.auth_header = {
+        # Links are included in JSON representations
+        # when the media type application/hal+json or */* is set in the Accept header of the HTTP request.
+        self.auth_header_links = {
             "accept": "application/hal+json",
             "Authorization": f"Basic {self.basic_auth_credentials}",
             "Content-Type": "application/hal+json",
         }
 
-        # included in JSON representations
-        # when the media type application/hal+json or */* is set in the Accept header of the HTTP request.
         # A media type of application/json will exclude the _links field in resource representations.
         self.auth_header_nolinks = {
             "accept": "application/json",
@@ -118,11 +189,20 @@ class BAMv2(requests.Session):  # pylint: disable=R0902
             "Content-Type": "application/hal+json",
         }
 
+        self.auth_header = self.auth_header_links
+        if self.links is not False:
+            self.auth_header_default = self.auth_header_links
+        else:
+            self.auth_header_default = self.auth_header_nolinks
+
+        logger = logging.getLogger()
+        logger.debug(f"{self.links} {self.auth_header_default}")
+
     def logout(self):
         """log out of BlueCat server, return nothing"""
         msg = {"state": "LOGGED_OUT"}
         logout_url = self.mainurl + "/sessions/current"
-        header = self.auth_header
+        header = self.auth_header_nolinks
         header["Content-Type"] = "application/merge-patch+json"
         self.patch(logout_url, headers=header, json=msg, timeout=self.timeout)
 
@@ -149,13 +229,13 @@ class BAMv2(requests.Session):  # pylint: disable=R0902
             help="password in environment, should not be on command line",
         )
         config.add_argument(
-            "--configuration",
+            "--configuration_name",
             "--cfg",
             help="BlueCat Configuration name",
             default=os.getenv("BLUECAT_CONFIGURATION"),
         )
         config.add_argument(
-            "--view", help="BlueCat View", default=os.getenv("BLUECAT_VIEW")
+            "--view_name", help="BlueCat View", default=os.getenv("BLUECAT_VIEW")
         )
         config.add_argument(
             "--logging",
@@ -180,6 +260,27 @@ class BAMv2(requests.Session):  # pylint: disable=R0902
         )
         return config
 
+
+    def get(self, urlpath, links=None, **kwargs):
+        """wrapper for requests.get with url prefix and error handling"""
+         # remove /api/v2 if included in urlpath, since mainurl already has it
+        urlpath=urlpath.removeprefix("/api/v2")
+        logging.debug(f"Using {self.mainurl} GET {urlpath} with kwargs {kwargs}")
+        url = f"{self.mainurl}{urlpath}"
+        if links is None:
+            links = self.links
+        if links:
+            header = self.auth_header_links
+        else:
+            header = self.auth_header_nolinks
+        kwargs["headers"] = header
+        response = requests.get(url, **kwargs)
+        if response.status_code != 200:
+            print(f"Failed: {response.status_code} Error")
+            logging.debug(response.text)
+        return response
+
+
     def get_config_and_view(self, configuration_name, view_name=None):
         """get configuration_id and view_id"""
         # usage: (configuration_id, view_id) =
@@ -189,7 +290,7 @@ class BAMv2(requests.Session):  # pylint: disable=R0902
 
         configuration_url = f"{self.mainurl}/configurations?fields=id,name&filter=name:eq('{configuration_name}')"
         response = requests.get(
-            configuration_url, headers=self.auth_header, timeout=self.timeout
+            configuration_url, headers=self.auth_header_nolinks, timeout=self.timeout
         )
         if response.status_code == 200:
             configurations = response.json()
@@ -206,7 +307,7 @@ class BAMv2(requests.Session):  # pylint: disable=R0902
                 f"{self.mainurl}/views?fields=id,name&filter=name:eq('{view_name}')"
             )
             response = requests.get(
-                view_url, headers=self.auth_header, timeout=self.timeout
+                view_url, headers=self.auth_header_nolinks, timeout=self.timeout
             )
             if response.status_code == 200:
                 views = response.json()
@@ -246,9 +347,13 @@ class BAMv2(requests.Session):  # pylint: disable=R0902
         """Get deployment roles"""
         logging.debug(f"Getting deployment roles for {identifier}")
 
-        if resource_type is None:
-            resource_type = self.detect_resource_type(identifier)
+        obj_list = self.get_obj_list(identifier, resource_type)
+        logging.debug(f"obj_list: {obj_list}")
 
+        '''
+        if resource_type is None:
+            resource_type,_ = self.match_type(identifier,None)
+            #resource_type = self.detect_resource_type(identifier)
         logging.debug(resource_type)
 
         if resource_type == "zone":
@@ -261,18 +366,26 @@ class BAMv2(requests.Session):  # pylint: disable=R0902
             print(f"Resource type {resource_type} not supported.")
             return None
 
-        response = requests.get(url, headers=self.auth_header, timeout=self.timeout)
+        response = requests.get(url, headers=self.auth_header_nolinks, timeout=self.timeout)
 
         if response.status_code != 200:
             print(f"Failed: {response.status_code} Error")
             logging.debug(response.text)
 
         data = response.json()
-        if not data["data"]:
+        '''
+
+        if not obj_list:
             print("Not found.")
             return None
-        resource_id = data["data"][0]["id"]
-        resource_type = resource_type + "s"
+        elif len(obj_list) > 1:
+            print(f"Multiple objects found: {obj_list}")
+            return None
+
+        resource_id = obj_list[0]["id"]
+        mylink = obj_list[0].get("_links", {}).get("self", {}).get("href", "")
+        resource_type =  mylink.split("/")[-2]
+        #resource_type = resource_type + "s"
 
         if deployment_type and resource_type != "zones":
             url = (
@@ -286,7 +399,7 @@ class BAMv2(requests.Session):  # pylint: disable=R0902
                 f"?fields=embed(interfaces)"
             )
 
-        response = requests.get(url, headers=self.auth_header, timeout=self.timeout)
+        response = requests.get(url, headers=self.auth_header_default, timeout=self.timeout)
         data = response.json()
         dic = {
             "id": resource_id,
@@ -310,59 +423,144 @@ class BAMv2(requests.Session):  # pylint: disable=R0902
                 #dic["role_ids"].append(role["id"])
         return dic
 
-    def match_type(self, object_ident, type=None, file=None):
-        '''Detect common identifiers like CIDR, range, IP, MAC, fqdn, id, other
-        where CIDR could be block or network,
-        and other could be a filename or other, or an error,
-        Returns type, value, error
-        id returns ("id", None, None)
-        MAC returns ("MACAddress", None, None)
-        IP returns ("IP4Address", ip, None)
-        CIDR returns ("CIDR", start, prefix)
-        range returns ("range", start, end)
-        fqdn returns ("fqdn", None, None)
-        other returns ("other", None, None)
+    # Define a set of "is_TYPE" functions
+    # see comments where the patterns are defined above
+
+    def is_ip4_range(self, object_ident):
+        """Detect if the identifier is an IPv4 range"""
+        range_match=self.ip4_range_pattern.match(object_ident)
+        if range_match is None:
+             return False
+        try:
+            ip_address(range_match.group("start"))
+            ip_address(range_match.group("end"))
+            return True
+        except ValueError:
+            return False
+
+    def is_ip6_range(self, object_ident):
+        """Detect if the identifier is an IPv6 range"""
+        range_match=self.ip6_range_pattern.match(object_ident)
+        if range_match is None:
+             return False
+        try:
+            ip_address(range_match.group("start"))
+            ip_address(range_match.group("end"))
+            return True
+        except ValueError:
+            return False
+
+    def is_ip4(self, object_ident):
+        """Detect if the identifier is an IPv4 address"""
+        if self.ip4_pattern.match(object_ident) is None:
+            return False
+        try:
+            ip_address(object_ident)
+            return True
+        except ValueError:
+            return False
+        
+    def is_ip6(self, object_ident):
+        """Detect if the identifier is an IPv6 address"""
+        if self.ip6_pattern.match(object_ident) is None:
+            return False
+        try:
+            ip_address(object_ident)
+            return True
+        except ValueError:
+            return False
+    
+    def is_cidr(self, object_ident):
+        """Detect if the identifier is a CIDR"""
+        ip4_match = self.ip4_cidr_pattern.match(object_ident)
+        #print(f"ip4_match {ip4_match}")
+        if ip4_match and ip4_match.group("prefix"):
+            try:
+                ip_network(object_ident, strict=True)
+                return True
+            except ValueError:
+                return False
+        ip6_match = self.ip6_cidr_pattern.match(object_ident)
+        if ip6_match and ip6_match.group("prefix"):
+            try:
+                ip_network(object_ident, strict=True)
+                return True
+            except ValueError:
+                return False
+        return False
+
+    def is_mac(self, object_ident):
+        """Detect if the identifier is a MAC address"""
+        return self.mac_pattern.match(object_ident) is not None
+    
+    def is_fqdn(self, object_ident):
+        """Detect if the identifier is a FQDN"""
+        return self.fqdn_pattern.match(object_ident) is not None
+    
+    def is_id(self, object_ident):
+        """Detect if the identifier is an ID (integer)"""
+        return self.id_pattern.match(object_ident) is not None
+
+    def match_type(self, object_ident, type=None):
+        '''Detect the category of common identifiers like CIDR, range, IP, MAC, fqdn, id, other
+        'category' is generally the 'collection' name in the BlueCat API,
+        where CIDR and range could be a block or a network,
+        and other could be a filename or other, or an error.
+        No BlueCat lookups are done, this is just based on the format of the identifier.
+        Returns type, value 
+        where type is one of:
+        id returns ("id", int)
+        MAC returns ("MACAddress", string)
+        IPv4 returns ("IP4Address", ipaddress)
+        IPv6 returns ("IP6Address", ipaddress)
+        CIDR returns ("CIDR", ipaddress-network), could be block or network
+        range (IPv4 or IPv6) returns ("range", string), could be block or network
+        fqdn returns ("fqdn", string), could be zone or RR
+        other returns ("other", string), could be a filename or other type of identifier
         '''
         logger = logging.getLogger()
-        part1=""
-        part2=""
-        id_match = self.id_pattern.match(object_ident)
-        if id_match:
-            obj_type = "id"
+        logger.debug(f"Matching type for {object_ident} with specified type {type}")
+        error=None
+
+        # The order is important, check more unique first
+        if self.is_ip4_range(object_ident):
+            obj_type="range"
+            value=object_ident
+        elif self.is_ip6_range(object_ident):
+            obj_type="range"
+            value=object_ident
+        elif self.is_cidr(object_ident):
+            obj_type="CIDR"
+            value=object_ident
+        elif self.is_ip4(object_ident):
+            obj_type="IP4Address"
+            value=object_ident
+        elif self.is_ip6(object_ident):
+            obj_type="IP6Address"  
+            value=object_ident
+        elif self.is_mac(object_ident):
+            obj_type="MACAddress"
+            value=object_ident
+        elif self.is_fqdn(object_ident):
+            obj_type="fqdn"
+            value=object_ident
+        elif self.is_id(object_ident):
+            obj_type="id"
+            value=int(object_ident)
         else:
-            mac_match = self.mac_pattern.match(object_ident)
-            if mac_match:
-                obj_type = "MACAddress"
-            else:
-                ip_match = self.ip_pattern.match(object_ident)
-                if ip_match and ip_match.group("start"):
-                    part1 = ip_match.group("start")
-                    if ip_match.group("prefix"):
-                        obj_type = "CIDR"  # IP4Block or IP4Network
-                        part2 = ip_match.group("prefix")
-                    elif ip_match.group("end"):
-                        obj_type = "DHCP4Range"
-                        part2 = ip_match.group("end")
-                    else:
-                        obj_type = "IP4Address"
-                else:
-                    fqdn_match = self.fqdn_pattern.match(object_ident)
-                    if fqdn_match:
-                        obj_type = "fqdn"
-                    else:
-                        obj_type = None
-        logger.info("matched type: %s, part1 %s, part2 %s", obj_type, part1, part2)
-        return obj_type, part1, part2
+            obj_type="other"
+            value=object_ident
+        
+        logger.info(f"matched type: {obj_type}, value {value}, error {error}")
+        return obj_type, value
 
 
-
+    '''
     def detect_resource_type(self, identifier):
         """Detect whether the identifier is a zone, block, or network"""
-        zone_pattern = r"[a-zA-Z0-9.-]+$"
-        block_pattern = r"^\d+\.\d+\.\d+\.\d+/\d+$"  # Example: 192.168.0.0/24
-        if re.match(zone_pattern, identifier):
-            return "zone"
-        if re.match(block_pattern, identifier):
+        if self.is_fqdn(identifier):
+             return "zone"
+        if self.is_cidr(identifier):
             network_url = f"{self.mainurl}/networks?filter=range:eq('{identifier}')"
             response = requests.get(
                 network_url, headers=self.auth_header, timeout=self.timeout
@@ -376,18 +574,19 @@ class BAMv2(requests.Session):  # pylint: disable=R0902
             if response.status_code == 200 and response.json().get("data"):
                 return "block"
         return "unknown"
+    '''
 
-    def get_fqdn_or_cidr(self, identifier, links=True, input_type=None):
+    def get_fqdn_or_cidr(self, identifier, links=True, type=None):
         """Detect whether the identifier is a zone, block, or network,
         returns the type and the list of objects, typically a list of one"""
         if links:
-            header = self.auth_header
+            header = self.auth_header_links
         else:
             header = self.auth_header_nolinks
         zone_pattern = r"[a-zA-Z0-9.-]+$"
         block_pattern = r"^\d+\.\d+\.\d+\.\d+/\d+$"  # Example: 192.168.0.0/24
         if re.match(zone_pattern, identifier):
-            if input_type is None or input_type == "zone":
+            if type is None or type == "zone":
                 fqdn_url = (
                     f"{self.mainurl}/zones?filter=absoluteName:eq('{identifier}')"
                 )
@@ -395,20 +594,66 @@ class BAMv2(requests.Session):  # pylint: disable=R0902
                 if response.status_code == 200 and response.json().get("data"):
                     return "zone", response.json().get("data")
         if re.match(block_pattern, identifier):
-            if input_type is None or input_type == "network":
+            if type is None or type == "network":
                 network_url = f"{self.mainurl}/networks?filter=range:eq('{identifier}')"
                 response = requests.get(
                     network_url, headers=header, timeout=self.timeout
                 )
                 if response.status_code == 200 and response.json().get("data"):
                     return "network", response.json().get("data")
-            if input_type is None or input_type == "block":
+            if type is None or type == "block":
                 block_url = f"{self.mainurl}/blocks?filter=range:eq('{identifier}')"
                 response = requests.get(block_url, headers=header, timeout=self.timeout)
                 if response.status_code == 200 and response.json().get("data"):
                     return "block", response.json().get("data")
-        return "unknown", {}
+        return "unknown", list()
 
+    
+    def get_obj_list(self, identifier, type=None):
+        """Detect whether the identifier is a zone, block, or network, etc, or '-' or filename and
+        returns the list of objects, typically a list of one"""
+        logger = logging.getLogger()
+        if not type:    # if type is not specified, try to detect it
+            type, value=self.match_type(identifier)
+            logger.debug(f"match_type returned type {type} value {value}")
+        header = self.auth_header_default
+        logger.debug(f"{header}")
+        if type in ("CIDR", "range", "network"):
+             # CIDR or range could be a block or a network, so check Network first since it's more specific
+            network_url = f"{self.mainurl}/networks?filter=range:eq('{identifier}')"
+            response = requests.get(network_url, headers=header, timeout=self.timeout)
+            if response.status_code == 200 and response.json().get("data"):
+                return response.json().get("data")
+            if type == 'network':
+                return ()  # if type is specified as network, don't check block
+        if type in ("CIDR", "range", "block"):
+            block_url = f"{self.mainurl}/blocks?filter=range:eq('{identifier}')"
+            response = requests.get(block_url, headers=header, timeout=self.timeout)
+            if response.status_code == 200 and response.json().get("data"):
+                return response.json().get("data")
+            else:
+                return ()
+        if type in ("fqdn", "zone"):
+            fqdn_url = (f"{self.mainurl}/zones?filter=absoluteName:eq('{identifier}')")
+            response = requests.get(fqdn_url, headers=header, timeout=self.timeout)
+            if response.status_code == 200 and response.json().get("data"):
+                return response.json().get("data")
+            if type == 'zone':
+                return ()  # if type is specified as zone, don't check RR
+        if type in ( "fqdn", "rr"):
+            rr_url = f"{self.mainurl}/resourceRecords?filter=absoluteName:eq('{identifier}')"
+            response = requests.get(rr_url, headers=header, timeout=self.timeout)
+            if response.status_code == 200 and response.json().get("data"):
+                return response.json().get("data")
+        if type == "id":
+            # get object by id
+            obj_url = f"{self.mainurl}?filter=id:{value}"
+            response = requests.get(obj_url, headers=header, timeout=self.timeout)
+            if response.status_code == 200 and response.json().get("data"):
+                return [response.json().get("data")]
+        # *** other, etc
+        return ()
+    
     def add_user(
         self,
         name,
@@ -425,7 +670,7 @@ class BAMv2(requests.Session):  # pylint: disable=R0902
         print(f"Adding user {name} to BlueCat:", end=" ")
         # get authenticator
         url = f"{self.mainurl}/authenticators?filter=name:eq('{authenticator}')"
-        response = self.get(url, headers=self.auth_header, timeout=self.timeout)
+        response = self.get(url, headers=self.auth_header_nolinks, timeout=self.timeout)
         if response.status_code != 200:
             print(f"Failed to get authenticator ID. Error: {response.status_code}")
             logging.debug(response.text)
@@ -452,7 +697,7 @@ class BAMv2(requests.Session):  # pylint: disable=R0902
             "historyPrivilege": history_privilege,
         }
         response = self.post(
-            url, headers=self.auth_header, json=data, timeout=self.timeout
+            url, headers=self.auth_header_default, json=data, timeout=self.timeout
         )
         if response.status_code == 201:
             print("Succeeded!")
@@ -475,7 +720,7 @@ class BAMv2(requests.Session):  # pylint: disable=R0902
                 "email": email
             }
         response = self.post(
-            url, headers=self.auth_header, json=data, timeout=self.timeout
+            url, headers=self.auth_header_default, json=data, timeout=self.timeout
         )
         if response.status_code == 201:
             print("Succeeded!")
@@ -488,7 +733,7 @@ class BAMv2(requests.Session):  # pylint: disable=R0902
         """Add a user to a group in BlueCat BAMv2 API"""
         print(f"Adding user to group {groupname}", end=" ")
         url = f"{self.mainurl}/groups?filter=name:eq('{urllib.parse.quote(groupname)}')"
-        response = requests.get(url, headers=self.auth_header, timeout=self.timeout)
+        response = requests.get(url, headers=self.auth_header_nolinks, timeout=self.timeout)
         if response.status_code != 200:
             print("Failed to get group ID. Error:", response.text)
         data = response.json()
@@ -500,7 +745,7 @@ class BAMv2(requests.Session):  # pylint: disable=R0902
         url = f"{self.mainurl}/groups/{group_id}/users"
         msg = {"id": userid, "type": "User"}
         response = requests.post(
-            url, headers=self.auth_header, json=msg, timeout=self.timeout
+            url, headers=self.auth_header_default, json=msg, timeout=self.timeout
         )
         if response.status_code == 201:
             print("Succeeded!")
@@ -513,7 +758,7 @@ class BAMv2(requests.Session):  # pylint: disable=R0902
         print(f"Getting user {username} groups", end=" ")
 
         url = f"{self.mainurl}/users?filter=name:eq('{username}')"
-        response = requests.get(url, headers=self.auth_header, timeout=self.timeout)
+        response = requests.get(url, headers=self.auth_header_nolinks, timeout=self.timeout)
         if response.status_code != 200:
             print("Failed to get user ID. Error:", response.text)
         data = response.json()
@@ -523,7 +768,7 @@ class BAMv2(requests.Session):  # pylint: disable=R0902
         user_id = data["data"][0]["id"]
 
         url = f"{self.mainurl}/users/{user_id}/groups"
-        response = requests.get(url, headers=self.auth_header, timeout=self.timeout)
+        response = requests.get(url, headers=self.auth_header_default, timeout=self.timeout)
         if response.status_code != 200:
             print(f"Failed: {response.status_code}")
             logging.debug(response.text)
@@ -542,7 +787,7 @@ class BAMv2(requests.Session):  # pylint: disable=R0902
         print(f"Getting group {groupname} users", end=" ")
 
         url = f"{self.mainurl}/groups?filter=name:eq('{urllib.parse.quote(groupname)}')"
-        response = requests.get(url, headers=self.auth_header, timeout=self.timeout)
+        response = requests.get(url, headers=self.auth_header_nolinks, timeout=self.timeout)
         if response.status_code != 200:
             print("Failed to get group ID. Error:", response.text)
         data = response.json()
@@ -552,7 +797,7 @@ class BAMv2(requests.Session):  # pylint: disable=R0902
         group_id = data["data"][0]["id"]
 
         url = f"{self.mainurl}/groups/{group_id}/users"
-        response = requests.get(url, headers=self.auth_header, timeout=self.timeout)
+        response = requests.get(url, headers=self.auth_header_default, timeout=self.timeout)
         if response.status_code != 200:
             print(f"Failed: {response.status_code}")
             logging.debug(response.text)
@@ -583,7 +828,7 @@ class BAMv2(requests.Session):  # pylint: disable=R0902
             url = f"{self.mainurl}/users?filter=name:eq('{username}')&fields=embed(groups)"
         else:
             url = f"{self.mainurl}/users?filter=name:eq('{username}')"
-        response = requests.get(url, headers=self.auth_header, timeout=self.timeout)
+        response = requests.get(url, headers=self.auth_header_default, timeout=self.timeout)
         if response.status_code != 200:
             print(f"Failed: {response.status_code}")
             logging.debug(response.text)
@@ -609,25 +854,30 @@ class BAMv2(requests.Session):  # pylint: disable=R0902
         return data["data"][0]
 
     def get_rr(self, hostname):
-        """Get Resource Records by hostname, return a list, just the basic fields, 
-        works for HostRecord, Alias(CNAME), TXT"""
+        """Get Resource Records by hostname and configuration, return a list"""
+        logger = logging.getLogger()
         url1 = f"{self.mainurl}/resourceRecords"
         url2 = f"?filter=absoluteName:eq('{hostname}')"
+        logger.debug(f"config name {self.configuration_name}")
         if self.configuration_name:
             url2a = f"and configuration.name:eq('{self.configuration_name}')"
         else:
             url2a=""
-        url3 = f"&fields=embed(addresses),id,type,recordType,name,configuration.id,configuration.name,ttl"
+        # just the basic fields?
+        url3 = f"&fields=id,type,name,configuration.id,configuration.name,ttl"
         url4 = f",absoluteName,linkedRecord.id,linkedRecord.type,linkedRecord.absoluteName"
-        url5 = f",text,rdata,userDefinedFields,_embedded.addresses"
-        url = "".join([url1,url2,url2a,url3,url4,url5])
-        response = requests.get(url, headers=self.auth_header, timeout=self.timeout)
+        url = "".join([url1,url2,url2a,url3,url4])
+        # or all the fields?
+        url = "".join([url1,url2,url2a])
+        logger.debug(url)
+        response = requests.get(url, headers=self.auth_header_default, timeout=self.timeout)
         if response.status_code != 200:
             print(f"Failed: {response.status_code}")
             logging.debug(response.text)
             return None
         data = response.json()
         if not data["data"]:
+            print("Not found.")
             return None
         return data["data"]
 
@@ -664,7 +914,7 @@ class BAMv2(requests.Session):  # pylint: disable=R0902
         rr["linkedRecord"]["id"] = linkid
         url = f"{self.mainurl}/resourceRecords/{rr['id']}"
         response = requests.put(
-            url, headers=self.auth_header, json=rr, timeout=self.timeout
+            url, headers=self.auth_header_default, json=rr, timeout=self.timeout
         )
         if response.status_code in (200, 201):
             newrr = response.json()
@@ -684,7 +934,7 @@ class BAMv2(requests.Session):  # pylint: disable=R0902
         for n, v in kwargs.items():
             url += f"{delim}{n}={v}"
             delim = "&"
-        response = requests.get(url, headers=self.auth_header, timeout=self.timeout)
+        response = requests.get(url, headers=self.auth_header_default, timeout=self.timeout)
         if response.status_code != 200:
             print(f"Failed: {response.status_code}")
             logging.debug(response.text)
@@ -702,7 +952,7 @@ class BAMv2(requests.Session):  # pylint: disable=R0902
         # where resources is a list of {"id": 1234, "type": "HostRecord"},
         url = f"{self.mainurl}/deployments"
         response = requests.post(
-            url, headers=self.auth_header, json=msg, timeout=self.timeout
+            url, headers=self.auth_header_default, json=msg, timeout=self.timeout
         )
         # print(response.json())
         data = response.json()
@@ -714,7 +964,7 @@ class BAMv2(requests.Session):  # pylint: disable=R0902
         status = ""
         state = ""
         while True:
-            response = requests.get(url, headers=self.auth_header, timeout=self.timeout)
+            response = requests.get(url, headers=self.auth_header_default, timeout=self.timeout)
             # print(response.json())
             data = response.json()
             if wait == "nowait":
@@ -796,7 +1046,7 @@ class BAMv2(requests.Session):  # pylint: disable=R0902
         while True:
             # print(f"look for zone {search_domain}")
             url = f"{self.mainurl}/zones?filter=absoluteName:eq('{search_domain}') and view.id:eq({self.view_id})"
-            response = requests.get(url, headers=self.auth_header, timeout=self.timeout)
+            response = requests.get(url, headers=self.auth_header_default, timeout=self.timeout)
             if response.status_code == 404:  # try next level, this is expected
                 zone_start += 1  # increment by one
                 search_domain = ".".join(domain_label_list[zone_start:zone_end])
@@ -831,20 +1081,21 @@ class BAMv2(requests.Session):  # pylint: disable=R0902
 
     def get_ip(self, ipaddressobj):
         """get IP4 or IP6 object, return obj,errormsg"""
-        url = f"{self.mainurl}/addresses?filter=address:eq('{ipaddressobj}') and configuration.id:eq({self.configuration_id})"
-        response = requests.get(url, headers=self.auth_header, timeout=self.timeout)
+        url = f"{self.mainurl}/addresses?filter=address:eq('{ipaddressobj}') and configuration.name:eq({self.configuration_name})"
+        response = requests.get(url, headers=self.auth_header_default, timeout=self.timeout)
         if response.status_code != 200:  # unexpected error
             errormsg = response.json()
             return None, errormsg
-        print(f"{response.json()}")
+        #print(f"{response.json()}")
         return response.json(), None
 
 
     def get_block(self,ip, links=True):
         """get closest enclosing block for IP Address, including blocks defined by a range, return blockobj,errormsg"""
         network_url = f"{self.mainurl}/blocks?filter=configuration.name:eq('{self.configuration_name}') and range:contains('{ip}')"
+        # Need the links on this one
         response = self.get(
-            network_url, headers=self.auth_header, timeout=self.timeout
+            network_url, links=True, timeout=self.timeout
         )
         if not response.status_code == 200:
             logging.debug(response.text)
