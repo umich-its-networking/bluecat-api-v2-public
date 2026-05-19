@@ -1,5 +1,6 @@
 # bluecat-api-v2-public
 
+```
 Setup:
 These scripts use enviroment variables.  To start, copy the file to somewhere safe, like ~/.ssh/ in linux (use any filename you like):
     filename=~/.ssh/bluecat.env
@@ -14,6 +15,7 @@ There are a few directories here:
     curl - Simple bash scripts using curl to illustrate the steps, and for testing.
     python - Better scripts with lots of options built in.
 		The python scripts need the "requests" module installed.
+```
 
 Here are some typical commands:
 
