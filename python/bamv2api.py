@@ -88,48 +88,45 @@ def main():
     data, params = helper(method, args)
 
     with BAMv2(args.server, args.username, args.password, args.timeout) as session:
-        url = f"{session.mainurl}/{args.command}"
-        if args.links:
-            header = session.auth_header
-        else:
-            header = session.auth_header_nolinks
+        #url = f"{session.mainurl}/{args.command}"
+        urlpath = f"/{args.command}"
         if method == "GET":
             response = session.get(
-                url,
+                urlpath,
                 params=params,
-                headers=header,
+                headers=session.auth_header,
                 timeout=session.timeout,
             )
         elif method == "POST":
             response = session.post(
-                url,
+                urlpath,
                 json=data,
                 params=params,
-                headers=header,
+                headers=session.auth_header,
                 timeout=session.timeout,
             )
         elif method == "PUT":
             response = session.put(
-                url,
+                urlpath,
                 json=data,
                 params=params,
-                headers=header,
+                headers=session.auth_header,
                 timeout=session.timeout,
             )
         elif method == "DELETE":
             response = session.delete(
-                url,
-                headers=header,
+                urlpath,
+                headers=session.auth_header,
                 timeout=session.timeout,
             )
         elif method == "PATCH":
-            header2 = header.copy()
-            header2["Content-Type"] = "application/merge-patch+json"
+            header = session.auth_header.copy()
+            header["Content-Type"] = "application/merge-patch+json"
             response = session.patch(
-                url,
+                urlpath,
                 json=data,
                 params=params,
-                headers=header2,
+                headers=header,
                 timeout=session.timeout,
             )
         if method in ["GET", "PUT", "PATCH"] and response.status_code != 200:
