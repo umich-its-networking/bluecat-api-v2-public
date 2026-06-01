@@ -89,17 +89,17 @@ def main():
 
     with BAMv2(args.server, args.username, args.password, args.timeout) as session:
         #url = f"{session.mainurl}/{args.command}"
-        urlpath = f"/{args.command}"
+        url = f"{session.mainurl}/{args.command}"
         if method == "GET":
             response = session.get(
-                urlpath,
+                url,
                 params=params,
                 headers=session.auth_header,
                 timeout=session.timeout,
             )
         elif method == "POST":
             response = session.post(
-                urlpath,
+                url,
                 json=data,
                 params=params,
                 headers=session.auth_header,
@@ -107,7 +107,7 @@ def main():
             )
         elif method == "PUT":
             response = session.put(
-                urlpath,
+                url,
                 json=data,
                 params=params,
                 headers=session.auth_header,
@@ -115,7 +115,7 @@ def main():
             )
         elif method == "DELETE":
             response = session.delete(
-                urlpath,
+                url,
                 headers=session.auth_header,
                 timeout=session.timeout,
             )
@@ -123,7 +123,7 @@ def main():
             header = session.auth_header.copy()
             header["Content-Type"] = "application/merge-patch+json"
             response = session.patch(
-                urlpath,
+                url,
                 json=data,
                 params=params,
                 headers=header,

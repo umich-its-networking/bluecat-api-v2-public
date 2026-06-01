@@ -25,11 +25,10 @@ def main():
     args = config.parse_args()
     ip = args.ip
 
-    logger = logging.getLogger()
     logging.basicConfig(format="%(asctime)s %(levelname)s: %(message)s")
-    logger.setLevel(args.logging)
+    logging.getLogger().setLevel(args.logging)
 
-    session = BAMv2(args.server, args.username, args.password, args.timeout, configuration_name=args.configuration)
+    session = BAMv2(args.server, args.username, args.password, args.timeout, configuration_name=args.configuration_name)
 
     with session:
 
@@ -38,7 +37,7 @@ def main():
         if error:
             print(f"ERROR: {error}")
             return
-        logger.debug(f"got {response}")
+        logging.debug(f"got {response}")
         if response['count'] == 0:
             print(f"Not found: {ip}")
             return
