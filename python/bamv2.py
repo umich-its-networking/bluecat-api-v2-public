@@ -195,8 +195,8 @@ class BAMv2(requests.Session):  # pylint: disable=R0902
         else:
             self.auth_header_default = self.auth_header_nolinks
 
-        logger = logging.getLogger()
-        logger.debug(f"{self.links} {self.auth_header_default}")
+
+        logging.debug(f"{self.links} {self.auth_header_default}")
 
     def logout(self):
         """log out of BlueCat server, return nothing"""
@@ -515,8 +515,7 @@ class BAMv2(requests.Session):  # pylint: disable=R0902
         fqdn returns ("fqdn", string), could be zone or RR
         other returns ("other", string), could be a filename or other type of identifier
         '''
-        logger = logging.getLogger()
-        logger.debug(f"Matching type for {object_ident} with specified type {type}")
+        logging.debug(f"Matching type for {object_ident} with specified type {type}")
         error=None
 
         # The order is important, check more unique first
@@ -548,7 +547,7 @@ class BAMv2(requests.Session):  # pylint: disable=R0902
             obj_type="other"
             value=object_ident
         
-        logger.info(f"matched type: {obj_type}, value {value}, error {error}")
+        logging.info(f"matched type: {obj_type}, value {value}, error {error}")
         return obj_type, value
 
 
@@ -609,12 +608,11 @@ class BAMv2(requests.Session):  # pylint: disable=R0902
     def get_obj_list(self, identifier, type=None):
         """Detect whether the identifier is a zone, block, or network, etc, or '-' or filename and
         returns the list of objects, typically a list of one"""
-        logger = logging.getLogger()
         if not type:    # if type is not specified, try to detect it
             type, value=self.match_type(identifier)
-            logger.debug(f"match_type returned type {type} value {value}")
+            logging.debug(f"match_type returned type {type} value {value}")
         header = self.auth_header_default
-        logger.debug(f"{header}")
+        logging.debug(f"{header}")
         if type in ("CIDR", "range", "network"):
              # CIDR or range could be a block or a network, so check Network first since it's more specific
             network_url = f"{self.mainurl}/networks?filter=range:eq('{identifier}')"
@@ -852,10 +850,9 @@ class BAMv2(requests.Session):  # pylint: disable=R0902
 
     def get_rr(self, hostname):
         """Get Resource Records by hostname and configuration, return a list"""
-        logger = logging.getLogger()
         url1 = f"{self.mainurl}/resourceRecords"
         url2 = f"?filter=absoluteName:eq('{hostname}')"
-        logger.debug(f"config name {self.configuration_name}")
+        logging.debug(f"config name {self.configuration_name}")
         if self.configuration_name:
             url2a = f"and configuration.name:eq('{self.configuration_name}')"
         else:
@@ -866,7 +863,7 @@ class BAMv2(requests.Session):  # pylint: disable=R0902
         url = "".join([url1,url2,url2a,url3,url4])
         # or all the fields?
         url = "".join([url1,url2,url2a])
-        logger.debug(url)
+        logging.debug(url)
         response = requests.get(url, headers=self.auth_header_default, timeout=self.timeout)
         if response.status_code != 200:
             print(f"Failed: {response.status_code}")
@@ -1076,9 +1073,9 @@ class BAMv2(requests.Session):  # pylint: disable=R0902
         remainder = ".".join(domain_label_list[0:zone_end])
         return found_zone_obj, remainder, errormsg
 
-    def get_ip(self, ipaddressobj):
+    def get_ip(self, ip):
         """get IP4 or IP6 object, return obj,errormsg"""
-        url = f"{self.mainurl}/addresses?filter=address:eq('{ipaddressobj}') and configuration.name:eq({self.configuration_name})"
+        url = f"{self.mainurl}/addresses?filter=address:eq('{ip}') and configuration.name:eq('{self.configuration_name}')"
         response = requests.get(url, headers=self.auth_header_default, timeout=self.timeout)
         if response.status_code != 200:  # unexpected error
             errormsg = response.json()
@@ -1119,3 +1116,27 @@ class BAMv2(requests.Session):  # pylint: disable=R0902
             return block,None   # the closet enclosing block, not a parent of another enclosing block
         else:
             return None,f"Error: more than one closest enclosing block? {toplist}"
+
+    def get_network(self,ip, links=True):
+        '''Get network that includes the given IP, return obj,errormsg'''
+        url=f"{self.mainurl}/networks?filter=configuration.name:eq('{self.configuration_name}') and range:contains('{ip}')"
+        response=self.get(
+            url, links=True
+        )
+        logging.debug(f"got {response}")
+        if response.status_code != 200:
+            return None, response.text
+        resp=response.json()
+        logging.debug(f"get_network.py got {resp}")
+
+        if not resp.get("data"):
+            return None, f"Network not found for: {ip}"
+        if resp['count'] == 0:
+            return None, f"Network not found for: {ip}"
+        if resp['count'] > 1:
+            return None, f"ERROR: Multiple networks found for {ip}"
+        network = resp["data"][0]
+        if not links:
+            network = self.removelinks(network)
+        return network, None
+
