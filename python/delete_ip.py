@@ -49,7 +49,7 @@ def main():
 
     with session:
         #print(f"looking for {ip}")
-        response=session.get_ip(ip)
+        response,error=session.get_ip(ip)
         logger.debug(f"got {response}")
         #print(f"got {response}")
         if response['count'] == 0:
