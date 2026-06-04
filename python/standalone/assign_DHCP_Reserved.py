@@ -32,9 +32,7 @@ def assign_dhcp_reserved(dic, session):
 
     # find this IP Address, if it exists
     network_url = f"{session.mainurl}/addresses?filter=address:eq('{dic['ip_addr']}')"
-    response = requests.get(
-        network_url, headers=session.auth_header
-    )
+    response = requests.get(network_url, headers=session.auth_header)
 
     # expect a 200 response, but likely zero data if it does not exist yet.
     if not response.status_code == 200:
@@ -46,15 +44,17 @@ def assign_dhcp_reserved(dic, session):
 
     if not data["data"]:
         # now search for the network to add the IP Address
-        response = session.get(f"/networks?filter=range:contains(\'{dic['ip_addr']}\') "
-                               f"and configuration.name:eq('{session.configuration_name}')")
+        response = session.get(
+            f"/networks?filter=range:contains('{dic['ip_addr']}') "
+            f"and configuration.name:eq('{session.configuration_name}')"
+        )
         if response.status_code != 200:
             print(f"Failed: {response.status_code} Error, {response.text}")
             logging.debug(response.text)
             return
         data = response.json()
         logging.debug(data)
-        
+
         ###### add if here???
 
         url = data["data"][0]["_links"]["addresses"]["href"]
@@ -65,7 +65,10 @@ def assign_dhcp_reserved(dic, session):
             "state": "DHCP_RESERVED",
             "address": dic["ip_addr"],
             "macAddress": {"address": dic["mac"]},
-            'userDefinedFields': {'Assigned_Date': dic['assigned'], 'Requested_by': dic['requested']},
+            "userDefinedFields": {
+                "Assigned_Date": dic["assigned"],
+                "Requested_by": dic["requested"],
+            },
         }
         if dic["host"]:
             msg["resourceRecords"] = [
@@ -77,22 +80,23 @@ def assign_dhcp_reserved(dic, session):
                             "id": session.view_id,
                             "type": "View",
                             "name": dic["view"],
-                            'userDefinedFields': {'Assigned_Date': dic['assigned'], 'Requested_by': dic['requested']},
+                            "userDefinedFields": {
+                                "Assigned_Date": dic["assigned"],
+                                "Requested_by": dic["requested"],
+                            },
                         }
                     ],
                 }
             ]
-        response = requests.post(
-            url, headers=session.auth_header, json=msg
-        )
+        response = requests.post(url, headers=session.auth_header, json=msg)
         if response.status_code != 201:
             print(f"Failed: {response.status_code} Error, {response.text}")
             logging.debug(response.text)
             return
         print("Success.")
         data = response.json()
-        #print(data)   # should add verbose option to print this
-        return 
+        # print(data)   # should add verbose option to print this
+        return
 
     print("Already Exists.", end=" ")
     update_helper(session, data["data"][0]["id"], dic)
@@ -123,39 +127,39 @@ def update_helper(session, addr_id, dic):
             }
         ]
     logging.debug(f"PUT data: {msg}")
-    response = requests.put(
-        url, headers=session.auth_header, json=msg
-    )
+    response = requests.put(url, headers=session.auth_header, json=msg)
     if response.status_code == 200:
         print("Update succeeded.")
     else:
         print(f"Update failed: {response.status_code} Error")
         logging.debug(response.text)
     # attempt to add host record
-    #if dic["host"]:
+    # if dic["host"]:
     #    # check existing host record
-
 
 
 def parse(description):
     """Set up common argparse arguments for BlueCat API"""
     config = BAMv2.argparsecommon(description)
 
-    config.add_argument("data", nargs="*", help="optional data to add, if not using --file," 
-                        " include IP MAC and optionally HOSTNAME, in any order, separated by spaces, tabs, commas, or whatever, for example: "
-                        "'1.2.3.4  a:b:c:d:e:f     myhost.mydomain.com' OR "
-                        "'a:b:c:d:e:f,1.2.3.4' OR " 
-                        "'myhost.mydomain.com/a:b:c:d:e:f/1.2.3.4'"
-                        )
+    config.add_argument(
+        "data",
+        nargs="*",
+        help="optional data to add, if not using --file,"
+        " include IP MAC and optionally HOSTNAME, in any order, separated by spaces, tabs, commas, or whatever, for example: "
+        "'1.2.3.4  a:b:c:d:e:f     myhost.mydomain.com' OR "
+        "'a:b:c:d:e:f,1.2.3.4' OR "
+        "'myhost.mydomain.com/a:b:c:d:e:f/1.2.3.4'",
+    )
     config.add_argument("-i", "--ip", help="ip address")
-    config.add_argument(
-        "-m", "--mac", help="Interface MAC or HW address"
-    )
+    config.add_argument("-m", "--mac", help="Interface MAC or HW address")
     config.add_argument("--ipname", help="optional - name for the IP object")
+    config.add_argument("-d", "--hostname", help="optional hostname (domainname)")
     config.add_argument(
-        "-d", "--hostname", help="optional hostname (domainname)"
+        "-n",
+        "--networkip",
+        help="optional network address to find next available IP Address",
     )
-    config.add_argument("-n", "--networkip", help="optional network address to find next available IP Address")
     config.add_argument(
         "-f",
         "--file",
@@ -164,8 +168,11 @@ def parse(description):
         default=sys.stdin,
         metavar="filename",
     )
-    config.add_argument("--assigned",help="optional Assigned Date in ISO 8601 format like 2025-06-23T00:00Z")
-    config.add_argument("--requested",help="optional Requested By")
+    config.add_argument(
+        "--assigned",
+        help="optional Assigned Date in ISO 8601 format like 2025-06-23T00:00Z",
+    )
+    config.add_argument("--requested", help="optional Requested By")
     return config
 
 
@@ -184,21 +191,25 @@ def main():
     filename = args.file
     ip_addr = args.ip
     mac = args.mac
-    data=args.data
+    data = args.data
 
     if not (configuration_name and view_name):
         print("--config and --view must be defined")
         config.print_help()
         sys.exit(1)
 
-    with BAMv2(args.server, args.username, args.password,) as session:
+    with BAMv2(
+        args.server,
+        args.username,
+        args.password,
+    ) as session:
 
         session.get_config_and_view(configuration_name, view_name)
 
         if args.networkip:
             # find the network
 
-            url=f"{session.mainurl}/networks?filter=configuration.name:eq('{session.configuration_name}') and range:contains('{args.networkip}')"
+            url = f"{session.mainurl}/networks?filter=configuration.name:eq('{session.configuration_name}') and range:contains('{args.networkip}')"
             response = requests.get(url, headers=session.auth_header)
             if response.status_code != 200:
                 print(f"Failed: {response.status_code} Error, {response.text}")
@@ -207,15 +218,19 @@ def main():
             data = response.json()
             logging.debug(data)
             if not data["data"]:
-                print(f"ERROR - network containing {args.networkip} not found in configuration {session.configuration_name}")
+                print(
+                    f"ERROR - network containing {args.networkip} not found in configuration {session.configuration_name}"
+                )
                 sys.exit(1)
-            args.network_id=data["data"][0]["id"]
+            args.network_id = data["data"][0]["id"]
         else:
-            args.network_id=None
+            args.network_id = None
 
         if filename != sys.stdin:
             if ip_addr or mac:
-                print("--file cannot be used with --ip and --mac or data, use one or other")
+                print(
+                    "--file cannot be used with --ip and --mac or data, use one or other"
+                )
                 config.print_help()
                 sys.exit(1)
             else:
@@ -235,39 +250,41 @@ def add_line(args, line, session):
     logger = logging.getLogger()
     logger.debug(f"Processing line: {line}")
     if args.ip:
-        ip=args.ip
+        ip = args.ip
     else:
         s = re.search(r"((?:\d{1,3}\.){3}\d{1,3})($|[^\d])", line)
         if s:
-            ip=s.group(1)
+            ip = s.group(1)
         elif args.networkip:
             # find next available IP Address if given a network
-            ip=find_next_ip(args, session)
+            ip = find_next_ip(args, session)
             if ip:
                 logger.debug(f"Found next available IP Address: {ip}")
             else:
-                print(f"ERROR - no available IP Address found in network {args.networkip}")
+                print(
+                    f"ERROR - no available IP Address found in network {args.networkip}"
+                )
                 return
         else:
             print(f"ERROR - no IP Address found in line: {line}")
             return
     if args.mac:
-        mac=args.mac
+        mac = args.mac
     else:
         s = re.search(
-                r"""(^|[^-.:0-9a-fA-F])((?:[0-9a-fA-F]{1,2}[-:.]){5}
+            r"""(^|[^-.:0-9a-fA-F])((?:[0-9a-fA-F]{1,2}[-:.]){5}
                 [0-9a-fA-F]{1,2}|[0-9a-fA-F]{12}|(?:[0-9a-fA-F]{4}
                 [.]){2}[0-9a-fA-F]{4})($|[^-.:0-9a-fA-F-])""",
-                line,
-                re.X,
-            )
+            line,
+            re.X,
+        )
         if s:
             mac = canonical_mac(s.group(2))
         else:
             print(f"ERROR - no MAC Address found in line: {line}")
             return
     if args.hostname:
-        host=args.hostname
+        host = args.hostname
     else:
         s = re.search(r"(((?!-)[A-Za-z0-9-]{1,63}(?<!-)\.)+[A-Za-z]{2,63})", line)
         if s:
@@ -316,7 +333,6 @@ def canonical_mac(mac):
     return hexout
 
 
-
 class BAMv2(requests.Session):  # pylint: disable=R0902
     """subclass requests and redefine requests.request to
     a simpler BlueCat interface"""
@@ -334,7 +350,7 @@ class BAMv2(requests.Session):  # pylint: disable=R0902
         password=None,
         configuration_name=None,
         view_name=None,
-        **kwargs
+        **kwargs,
     ):
         """login to BlueCat server API, get token, set header"""
         self.username = username
@@ -347,9 +363,11 @@ class BAMv2(requests.Session):  # pylint: disable=R0902
             print("server, username, and password are required.\n")
             raise requests.RequestException
         self.server = server
-        logging.debug(f"server: {self.server} username: {self.username} "
-                      f"configuration_name: {self.configuration_name} "
-                      f"view_name: {self.view_name}")
+        logging.debug(
+            f"server: {self.server} username: {self.username} "
+            f"configuration_name: {self.configuration_name} "
+            f"view_name: {self.view_name}"
+        )
         self.mainurl = f"https://{server}/api/v2"
         logging.info("url: %s", self.mainurl)
 
@@ -373,9 +391,7 @@ class BAMv2(requests.Session):  # pylint: disable=R0902
             raise requests.HTTPError
 
         response_data = response.json()
-        self.basic_auth_credentials = response_data[
-            "basicAuthenticationCredentials"
-        ]
+        self.basic_auth_credentials = response_data["basicAuthenticationCredentials"]
 
         # Links are included in JSON representations
         # when the media type application/hal+json or */* is set in the Accept header of the HTTP request.
@@ -439,8 +455,6 @@ class BAMv2(requests.Session):  # pylint: disable=R0902
 
     def get(self, urlpath, **kwargs):
         """wrapper for requests.get with url prefix and error handling"""
-         # remove /api/v2 if included in urlpath, since mainurl already has it
-        urlpath=urlpath.removeprefix("/api/v2")
         logging.debug(f"Using {self.mainurl} GET {urlpath} with kwargs {kwargs}")
         url = f"{self.mainurl}{urlpath}"
         header = self.auth_header
@@ -459,9 +473,7 @@ class BAMv2(requests.Session):  # pylint: disable=R0902
         # (configuration_id, _) = conn.get_config_and_view(configuration_name)
 
         configuration_url = f"{self.mainurl}/configurations?fields=id,name&filter=name:eq('{configuration_name}')"
-        response = requests.get(
-            configuration_url, headers=self.auth_header
-        )
+        response = requests.get(configuration_url, headers=self.auth_header)
         if response.status_code == 200:
             configurations = response.json()
             # print(configurations)
@@ -476,9 +488,7 @@ class BAMv2(requests.Session):  # pylint: disable=R0902
             view_url = (
                 f"{self.mainurl}/views?fields=id,name&filter=name:eq('{view_name}')"
             )
-            response = requests.get(
-                view_url, headers=self.auth_header
-            )
+            response = requests.get(view_url, headers=self.auth_header)
             if response.status_code == 200:
                 views = response.json()
                 logging.info("View ID: %s", {views["data"][0]["id"]})
