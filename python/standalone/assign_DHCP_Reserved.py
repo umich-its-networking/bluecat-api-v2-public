@@ -372,25 +372,10 @@ class BAMv2(requests.Session):  # pylint: disable=R0902
             print(response.json(), file=sys.stderr)
             raise requests.HTTPError
 
-        start_time = datetime.now(timezone.utc)
-
         response_data = response.json()
-        # self.token = response_data["apiToken"]  # old version, 9.5.x and below
         self.basic_auth_credentials = response_data[
             "basicAuthenticationCredentials"
-        ]  # required in 9.6
-        end_time = datetime.fromisoformat(
-            response_data["apiTokenExpirationDateTime"].replace("Z", "+00:00")
-        )
-        duration = end_time - start_time
-        logging.info(
-            "API basic_auth_credentials: %s, start time: %s, end time: %s, duration: %s",
-            self.basic_auth_credentials,
-            start_time,
-            end_time,
-            duration,
-        )
-        # logging.info(self.basic_auth_credentials)
+        ]
 
         # Links are included in JSON representations
         # when the media type application/hal+json or */* is set in the Accept header of the HTTP request.
