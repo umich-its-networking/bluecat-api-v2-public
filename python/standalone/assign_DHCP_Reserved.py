@@ -47,7 +47,7 @@ def assign_dhcp_reserved(dic, session):
     if not data["data"]:
         # now search for the network to add the IP Address
         response = session.get(f"/networks?filter=range:contains(\'{dic['ip_addr']}\') "
-                               f"and configuration.name:eq('{session.configuration_name}')", links=True)
+                               f"and configuration.name:eq('{session.configuration_name}')")
         if response.status_code != 200:
             print(f"Failed: {response.status_code} Error, {response.text}")
             logging.debug(response.text)
@@ -255,9 +255,9 @@ def add_line(args, line, session):
         mac=args.mac
     else:
         s = re.search(
-                r"""(^|[^:0-9a-fA-F])((?:[0-9a-fA-F]{1,2}[-:.]){5}
+                r"""(^|[^-.:0-9a-fA-F])((?:[0-9a-fA-F]{1,2}[-:.]){5}
                 [0-9a-fA-F]{1,2}|[0-9a-fA-F]{12}|(?:[0-9a-fA-F]{4}
-                [.]){2}[0-9a-fA-F]{4})($|[^:0-9a-fA-F-])""",
+                [.]){2}[0-9a-fA-F]{4})($|[^-.:0-9a-fA-F-])""",
                 line,
                 re.X,
             )
@@ -334,7 +334,6 @@ class BAMv2(requests.Session):  # pylint: disable=R0902
         password=None,
         configuration_name=None,
         view_name=None,
-        links=None,
         **kwargs
     ):
         """login to BlueCat server API, get token, set header"""
@@ -344,13 +343,12 @@ class BAMv2(requests.Session):  # pylint: disable=R0902
         self.configuration_name = configuration_name
         self.view_id = None
         self.view_name = view_name
-        self.links = links
         if not (server and username and password):
             print("server, username, and password are required.\n")
             raise requests.RequestException
         self.server = server
         logging.debug(f"server: {self.server} username: {self.username} "
-                      f"links: {self.links} configuration_name: {self.configuration_name} "
+                      f"configuration_name: {self.configuration_name} "
                       f"view_name: {self.view_name}")
         self.mainurl = f"https://{server}/api/v2"
         logging.info("url: %s", self.mainurl)
@@ -374,55 +372,27 @@ class BAMv2(requests.Session):  # pylint: disable=R0902
             print(response.json(), file=sys.stderr)
             raise requests.HTTPError
 
-        start_time = datetime.now(timezone.utc)
-
         response_data = response.json()
-        # self.token = response_data["apiToken"]  # old version, 9.5.x and below
         self.basic_auth_credentials = response_data[
             "basicAuthenticationCredentials"
-        ]  # required in 9.6
-        end_time = datetime.fromisoformat(
-            response_data["apiTokenExpirationDateTime"].replace("Z", "+00:00")
-        )
-        duration = end_time - start_time
-        logging.info(
-            "API basic_auth_credentials: %s, start time: %s, end time: %s, duration: %s",
-            self.basic_auth_credentials,
-            start_time,
-            end_time,
-            duration,
-        )
-        # logging.info(self.basic_auth_credentials)
+        ]
 
         # Links are included in JSON representations
         # when the media type application/hal+json or */* is set in the Accept header of the HTTP request.
-        self.auth_header_links = {
+        self.auth_header = {
             "accept": "application/hal+json",
             "Authorization": f"Basic {self.basic_auth_credentials}",
             "Content-Type": "application/hal+json",
         }
 
-        # A media type of application/json will exclude the _links field in resource representations.
-        self.auth_header_nolinks = {
-            "accept": "application/json",
-            "Authorization": f"Basic {self.basic_auth_credentials}",
-            "Content-Type": "application/hal+json",
-        }
-
-        self.auth_header = self.auth_header_links
-        if self.links is not False:
-            self.auth_header_default = self.auth_header_links
-        else:
-            self.auth_header_default = self.auth_header_nolinks
-
         logger = logging.getLogger()
-        logger.debug(f"{self.links} {self.auth_header_default}")
+        logger.debug(f"{self.auth_header}")
 
     def logout(self):
         """log out of BlueCat server, return nothing"""
         msg = {"state": "LOGGED_OUT"}
         logout_url = self.mainurl + "/sessions/current"
-        header = self.auth_header_nolinks
+        header = self.auth_header
         header["Content-Type"] = "application/merge-patch+json"
         self.patch(logout_url, headers=header, json=msg)
 
@@ -465,26 +435,15 @@ class BAMv2(requests.Session):  # pylint: disable=R0902
             + "will show the password in the login call",
             default=os.getenv("BLUECAT_LOGGING", "WARNING"),
         )
-        config.add_argument(
-            "--links",
-            default=True,
-            action=argparse.BooleanOptionalAction,
-            help="option --no-links will remove links from returned objects in some cases",
-        )
         return config
 
-    def get(self, urlpath, links=None, **kwargs):
+    def get(self, urlpath, **kwargs):
         """wrapper for requests.get with url prefix and error handling"""
          # remove /api/v2 if included in urlpath, since mainurl already has it
         urlpath=urlpath.removeprefix("/api/v2")
         logging.debug(f"Using {self.mainurl} GET {urlpath} with kwargs {kwargs}")
         url = f"{self.mainurl}{urlpath}"
-        if links is None:
-            links = self.links
-        if links:
-            header = self.auth_header_links
-        else:
-            header = self.auth_header_nolinks
+        header = self.auth_header
         kwargs["headers"] = header
         response = requests.get(url, **kwargs)
         if response.status_code != 200:
@@ -501,7 +460,7 @@ class BAMv2(requests.Session):  # pylint: disable=R0902
 
         configuration_url = f"{self.mainurl}/configurations?fields=id,name&filter=name:eq('{configuration_name}')"
         response = requests.get(
-            configuration_url, headers=self.auth_header_nolinks
+            configuration_url, headers=self.auth_header
         )
         if response.status_code == 200:
             configurations = response.json()
@@ -518,7 +477,7 @@ class BAMv2(requests.Session):  # pylint: disable=R0902
                 f"{self.mainurl}/views?fields=id,name&filter=name:eq('{view_name}')"
             )
             response = requests.get(
-                view_url, headers=self.auth_header_nolinks
+                view_url, headers=self.auth_header
             )
             if response.status_code == 200:
                 views = response.json()
