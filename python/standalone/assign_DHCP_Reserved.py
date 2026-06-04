@@ -468,7 +468,7 @@ class BAMv2(requests.Session):  # pylint: disable=R0902
         config.add_argument(
             "--links",
             default=True,
-            action=argparse.BooleanOptionalAction,
+            #action=argparse.BooleanOptionalAction,
             help="option --no-links will remove links from returned objects in some cases",
         )
         return config
