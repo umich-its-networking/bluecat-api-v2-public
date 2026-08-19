@@ -620,21 +620,21 @@ class BAMv2(requests.Session):  # pylint: disable=R0902
             if response.status_code == 200 and response.json().get("data"):
                 return response.json().get("data")
             if type == 'network':
-                return ()  # if type is specified as network, don't check block
+                return []  # if type is specified as network, don't check block
         if type in ("CIDR", "range", "block"):
             block_url = f"{self.mainurl}/blocks?filter=range:eq('{identifier}')"
             response = requests.get(block_url, headers=header, timeout=self.timeout)
             if response.status_code == 200 and response.json().get("data"):
                 return response.json().get("data")
             else:
-                return ()
+                return []
         if type in ("fqdn", "zone"):
             fqdn_url = (f"{self.mainurl}/zones?filter=absoluteName:eq('{identifier}')")
             response = requests.get(fqdn_url, headers=header, timeout=self.timeout)
             if response.status_code == 200 and response.json().get("data"):
                 return response.json().get("data")
             if type == 'zone':
-                return ()  # if type is specified as zone, don't check RR
+                return []  # if type is specified as zone, don't check RR
         if type in ( "fqdn", "rr"):
             rr_url = f"{self.mainurl}/resourceRecords?filter=absoluteName:eq('{identifier}')"
             response = requests.get(rr_url, headers=header, timeout=self.timeout)
@@ -647,7 +647,7 @@ class BAMv2(requests.Session):  # pylint: disable=R0902
             if response.status_code == 200 and response.json().get("data"):
                 return [response.json().get("data")]
         # *** other, etc
-        return ()
+        return []
     
     def add_user(
         self,
@@ -1119,6 +1119,15 @@ class BAMv2(requests.Session):  # pylint: disable=R0902
 
     def get_network(self,ip, links=True):
         '''Get network that includes the given IP, return obj,errormsg'''
+        # if CIDR, do exact match
+        if '/' in ip:
+            networklist=self.get_obj_list(ip, type="network")
+            if len(networklist) == 0:
+                return None, f"Network not found for: {ip}"
+            if len(networklist) > 1:
+                return None, f"ERROR: Multiple networks found for {ip}"
+            return networklist[0],None
+       # else, do range:contains
         url=f"{self.mainurl}/networks?filter=configuration.name:eq('{self.configuration_name}') and range:contains('{ip}')"
         response=self.get(
             url, links=True
